@@ -1,0 +1,151 @@
+---
+title: "Дипломный проект"
+author: "Лазарева Е.В."
+date: "18 04 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+# Подключение библиотек
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(tidyverse)
+library(readr)
+library(plotly)
+library(corrplot)
+library(ggplot2)
+
+# Загрузка датасетов
+bank_full <- read_csv2("bank-full.csv", )
+deposits_tariff <- read_csv2("deposits-tariff.csv")
+
+# код и результат выполнения не отобразится. Хорошо для подключения библиотек.
+```
+
+### 1. Подготовка данных для анализа ###
+
+В датасете присутствуют аномальные значения в столбце с возрастом, а именно отрицательные значения. Также есть отрицательные значения среднемесячного баланса на счетах клиента.
+Аномальные значения удалим из датасета.
+В столбце deposittype заменим значение NA на no deposit.
+Объединим датасет с данными по маркетинговой кампании с информацией по тарифам депозитов.
+
+```{r}
+bank_full_clean <- filter(bank_full, age > 0, balance > 0) #Фильтруем датасет
+
+# Замена NA на 'no deposit' в столбце deposittype
+for (i in 1:nrow(bank_full_clean)) {
+  x <- 'no deposit'
+  bank_full_clean[i,19] <- ifelse(is.na(bank_full_clean[i,19]), x, bank_full_clean[i,19])
+}
+
+# Объединить датасет с данными по маркетинговой кампании с информацией по тарифам депозитов.
+bank_and_deposits <- left_join(bank_full_clean, deposits_tariff, by = 'deposittype')
+
+```
+
+### 2. Визуальный анализ данных результатов маркетинговой компании ### 
+
+На графике видно, что большая часть клиентов не взяли депозит в результате маркетинговой компании.
+Но явно утверждать об эффективность маркетинговой компании мы не можем, т.к. не знаем плановое количество выданных депозитов.Возможно это и неплохой результат.
+
+```{r}
+
+# При помощи группировки посмотрим по каждому типу депозитов сколько выдано депозитов
+result_marketing_percent <- bank_and_deposits %>% select(deposittype) %>% group_by(deposittype) %>% 
+  summarise(count = n()) %>% mutate(percent = round((count / 45203) * 100, 1))
+
+# Посмотрим результат на графике
+ggplotly(ggplot(data = result_marketing_percent, mapping = aes(x = deposittype , y = count)) + geom_col() +
+           xlab("Тип депозита") + ylab("Количество выданных депозитов") +
+           theme_light())
+```
+
+### 3. Эффективность маркетинговой компании ###
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+#Успешная коммуникация
+result1 <- filter(bank_full_clean, deposittype != 'no deposit')
+successful_communications <- round(mean(result1$duration) / 60, 0) # Средняя длительность успешной коммуникации 9 минут 
+
+# Количество звонков, совершенных клиенту в случае успешной коммуникации. 
+count_successful_communications <- round(mean(result1$campaign), 0)
+
+#Неуспешная коммуникация
+result2 <- filter(bank_full_clean, deposittype == 'no deposit')
+unsuccessful_communications <- round(mean(result2$duration) / 60, 0) # Средняя длительность неуспешной коммуникации 4 минуты.
+
+# Среднее количество звонков, соверешенное клиенту в случае неуспешной коммуникации:
+count_unsuccessful_communications <- round(mean(result2$campaign), 0)
+```
+
+**В результате маркетинговой компании можно сделать вывод, что:**
+
+  * в среднем требуется совершить **`r count_successful_communications` звонка(ов)** длительностью около **`r successful_communications` минут(ы)**, чтобы клиент взял продукт;
+  * в случае отказа клиента было совершено в среднем **`r count_unsuccessful_communications` звонка(ов)** длительностью около **`r unsuccessful_communications` минут(ы)**.
+  
+Более длительные  и нечастые коммуникации - более успешны.
+
+### 4. Портрет клиента ###
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+#Посмотрим возраст
+max_count_ages <- filter(bank_and_deposits, deposittype != 'no deposit') %>% group_by(age) %>% summarise(counts = n()) %>% filter(counts == max(counts))
+age <- max_count_ages[1, 1] #возвраст клиента
+
+# посмотрим профессию:
+max_count_job <- filter(bank_and_deposits, deposittype != 'no deposit') %>% group_by(job) %>% summarise(counts = n()) %>% filter(counts == max(counts))
+job <- max_count_job[1, 1] #Профессия клиента
+
+# Посмотрим семейное положение:
+max_count_marital <- filter(bank_and_deposits, deposittype != 'no deposit') %>% group_by(marital) %>% summarise(counts = n()) %>% filter(counts == max(counts))
+marital <- max_count_marital[1, 1] #семейное положение клиента
+
+#Посмотрим образование
+max_count_education <- filter(bank_and_deposits, deposittype != 'no deposit') %>% group_by(education) %>% summarise(counts = n()) %>% filter(counts == max(counts))
+education <- max_count_education[1,1]
+```
+
+**Составлен портрет клиента, который взял депозит:**
+
+* **Возраст:** `r age` лет;
+* **Семейное положени:** `r marital`;
+* **Профессия:** `r job`
+* **Образование:** `r education`
+
+
+### 5. Влияние наличия тех или иных продуктов на решение клиента взять депозит ###
+
+Для анализа выберем следующий показатели:
+
+* наличие кредита с просроченной задолженностью (default);
+* наличие ипотеки (housing);
+* наличие потребительского кредита (loan);
+* наличие зарплатного проекта (salary)
+
+Подготовим датасет для данного анализа. Выберем необходимые переменные и преобразуем бинарные переменные в чиловые.
+Нормализовать данные не требуется, т.к. значения только 1 и 0.
+
+Из корреляционной матрицы видим низкую зависисмоть между наличием продуктов и решением клиента взять депозит.
+
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+# Выберем нужные переменные
+bank_and_deposits_cor <- select(bank_and_deposits, default, housing, loan, salary, y)
+bank_and_deposits_cor1 <- bank_and_deposits_cor #перезапишем датасет в новый для сохранения промежутоных результатов
+
+# Преобразуем бинарные переменные в числовые ( yes = 1, no = 0) 
+bank_and_deposits_cor1 <- bank_and_deposits_cor1 %>% mutate(default = ifelse(default == 'yes', 1, 0)) %>%
+  mutate(housing = ifelse(housing == 'yes', 1, 0)) %>%
+  mutate(loan = ifelse(loan == 'yes', 1, 0)) %>%
+  mutate(salary = ifelse(salary == 'yes', 1, 0)) %>%
+  mutate(y = ifelse(y == 'yes', 1,0))
+
+
+# Посмотри корреляцию между параметрами. Нормализовать переменную не нужно, т.к. у нас значения 1 и 0.
+corrMatr <- cor(bank_and_deposits_cor1)
+corrplot(corrMatr, method = 'color', type = 'upper')
